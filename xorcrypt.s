@@ -2,9 +2,11 @@ section .data
     data_file db "data.dat", 0x0
     key_file db "key.bin", 0x0
     out_file db "data.enc", 0x0
+    err_msg db "Program exits due to errors", 0x0
     buf_in_len dq 0x10
     buf_key_len dq 0x10
     buf_out_len dq 0x10
+    err_msg_len dq 0x1c
     newline db 0xA
 
 section .bss
@@ -12,7 +14,7 @@ section .bss
     buf_key resb 16
     buf_out resb 16
     padding resb 0x10
-
+    stat_buf resb 144
 
 section .text
     global _start
@@ -20,10 +22,10 @@ section .text
     global fn_load_file
     global fn_error_exit
     global fn_xor_buf
-    global fn_dbg_print_buf_in
+    global fn_stat_file
+; Functions
 
-; Functions 
-
+; Debug prints function only
 fn_dbg_print_buf_out:
     push rbp
     mov rbp, rsp
@@ -47,6 +49,7 @@ fn_dbg_print_buf_out:
     pop rbp
     ret
 
+; Debug prints function only
 fn_dbg_print_buf_in:
     push rbp
     mov rbp, rsp
@@ -70,15 +73,52 @@ fn_dbg_print_buf_in:
     pop rbp
     ret
 
+; Function to exit
 fn_error_exit:
+    ; Print error message
+    mov rax, 1  
+    mov rdi, 1
+    lea rsi, [err_msg]
+    movzx rdx, byte [err_msg_len]
+    syscall
+
     mov rax, 0x3c               ; exit syscall
     mov rdi, 0x1                ; Error code
+    syscall
 
-; Opens up a file and reads up to buf_in_le bytes into buffer
+; Function to get the size of a file
+; Arguments:
+; *input file name - rdi - address of the null-terminated file name string
+; *stat_struct - rsi - address of the stat buffer structure 
+; Return value:
+; rax - Size of file
+fn_stat_file:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x8
+
+    ; Call 'stat'
+    mov rax, 4
+    ; Address of file name is already in rdi
+    ; Address of the stat buffer is already in rsi 
+    syscall
+
+    ; Check for errors
+    cmp rax, 0
+    jl fn_error_exit
+
+    ; Load file size from the stat_buf
+    mov rax, qword [stat_buf + 0x30]     ; Offset of `st_size` in stat structure
+
+    mov rsp, rbp
+    pop rbp
+    ret
+    
+; Opens up a file and reads up to buf_in_len bytes into buffer
 ; Arguments:
 ; *input_file_name - rdi - address of the null-terminated file name string
 ; *buffer - rsi - address of the buffer
-; buf_in_le - rdx - number of bytes to read
+; buf_in_len - rdx - number of bytes to read
 fn_load_file:
     push rbp
     mov rbp, rsp
@@ -88,12 +128,11 @@ fn_load_file:
 
     ; Open the file
     mov rax, 0x2                ; open syscall
-    ; lea rdi, [data_file]      ; Pointer to data_file
     mov rsi, 0x0                ; O_RDONLY flag set
     syscall
 
     cmp rax, 0x0                ; Error handling
-    jnl lbl_load_file_skip_error    
+    jnl lbl_load_file_skip_error
     call fn_error_exit
     
     lbl_load_file_skip_error:
@@ -104,8 +143,6 @@ fn_load_file:
     mov rdi, r12                        ; Copy fd to rdi
     pop rdx                             ; Get rdx from stack
     pop rsi                             ; Get rsi from stack
-    ; lea rsi, [buf_in]                 ; Pointer to buf_in to store data
-    ; movzx rdx, BYTE [buf_in_len]      ; Number of bytes to read
     syscall
 
     ; Close the fd
@@ -159,11 +196,25 @@ main:
     mov rbp, rsp
     sub rsp, 0x8                ; Stackframe
 
+    ; Load input file size
+    lea rdi, [data_file]
+    lea rsi, [stat_buf]
+    call fn_stat_file
+
+    mov [buf_in_len], rax       ; Store the size of the file
+
     ; Load buffer from input file
     lea rdi, [data_file]
     lea rsi, [buf_in]
     mov rdx, qword [buf_in_len]
     call fn_load_file
+
+    ; Load key file size
+    lea rdi, [key_file]
+    lea rsi, [stat_buf]
+    call fn_stat_file
+
+    mov [buf_key_len], rax      ; Store the size of the file
 
     ; Load buffer from key file
     lea rdi, [key_file]
@@ -171,7 +222,10 @@ main:
     mov rdx, qword [buf_key_len]
     call fn_load_file
 
+    ; Perform XOR of the buffer
     call fn_xor_buf
+
+
 
     mov rsp, rbp
     pop rbp
