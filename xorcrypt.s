@@ -6,7 +6,9 @@ section .data
     newline db 0xA
 
 section .bss
-    buffer resb 16
+    buf_in resb 16
+    buf_key resb 16
+    buf_out resb 16
     padding resb 0x100
 
 
@@ -25,10 +27,10 @@ fn_dbg_print_buf:
     mov rbp, rsp
     sub rsp, 0x8                ; Stackframe
 
-    ; Print buffer
+    ; Print buf_in
     mov rax, 1  
     mov rdi, 1
-    lea rsi, [buffer]
+    lea rsi, [buf_in]
     movzx rdx, BYTE [buffer_length]
     syscall
 
@@ -66,10 +68,10 @@ fn_load_file:
     mov r12, rax                ; Save fd of file in r12
      
     ; Read from the file
-    mov rax, 0x0                ; read syscall
-    mov rdi, r12                ; Copy fd to rdi
-    lea rsi, [buffer]           ; Pointer to buffer to store data
-    mov rdx, buffer_length      ; Number of bytes to read
+    mov rax, 0x0                        ; read syscall
+    mov rdi, r12                        ; Copy fd to rdi
+    lea rsi, [buf_in]                   ; Pointer to buf_in to store data
+    movzx rdx, BYTE [buffer_length]     ; Number of bytes to read
     syscall
     
     ; Close the fd
@@ -92,11 +94,11 @@ fn_xor_buf:
     xor rcx, rcx                ; Zero out counter
 
     lbl_xor_buf_loop:
-        lea rsi, [buffer]                   ; Load address to rsi
+        lea rsi, [buf_in]                   ; Load address to rsi
         add rsi, rcx                        ; Modify offset
         mov al, byte [rsi]                  ; Move byte into al for XOR-ing
         xor al, 0x1                         ; XORs each byte with 0x1
-        mov byte [rsi], al                  ; Replace buffer in-place
+        mov byte [rsi], al                  ; Replace buf_in in-place
         inc rcx
         cmp cl, BYTE [buffer_length]
         jne lbl_xor_buf_loop
@@ -115,6 +117,8 @@ main:
     call fn_load_file
 
     call fn_xor_buf
+
+    
 
     mov rsp, rbp
     pop rbp
