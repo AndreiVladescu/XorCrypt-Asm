@@ -1,18 +1,16 @@
 section .data
-    data_file db "data.dat", 0x0
-    key_file db "key.bin", 0x0
-    out_file db "data.enc", 0x0
+    in_file_str db "data.dat", 0x0
+    key_file_str db "key.bin", 0x0
+    out_file_str db "data.enc", 0x0
     err_msg db "Program exits due to errors", 0x0
     buf_in_len dq 0x10
     buf_key_len dq 0x10
-    buf_out_len dq 0x10
     err_msg_len dq 0x1c
     newline db 0xA
 
 section .bss
-    buf_in resb 16
-    buf_key resb 16
-    buf_out resb 16
+    buf_in resb 0x100
+    buf_key resb 0x100
     padding resb 0x10
     stat_buf resb 144
 
@@ -23,31 +21,9 @@ section .text
     global fn_error_exit
     global fn_xor_buf
     global fn_stat_file
+    global fn_store_data
+
 ; Functions
-
-; Debug prints function only
-fn_dbg_print_buf_out:
-    push rbp
-    mov rbp, rsp
-    sub rsp, 0x8                ; Stackframe
-
-    ; Print buf_out
-    mov rax, 1  
-    mov rdi, 1
-    lea rsi, [buf_out]
-    movzx rdx, BYTE [buf_out_len]
-    syscall
-
-    ; Print newline
-    mov rax, 1  
-    mov rdi, 1
-    lea rsi, [newline]
-    mov rdx, 0x1
-    syscall
-
-    mov rsp, rbp
-    pop rbp
-    ret
 
 ; Debug prints function only
 fn_dbg_print_buf_in:
@@ -85,6 +61,43 @@ fn_error_exit:
     mov rax, 0x3c               ; exit syscall
     mov rdi, 0x1                ; Error code
     syscall
+
+; Function to store the XORed data into the output file
+fn_store_data:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x8                ; Stackframe  
+
+    ; Open the file
+    mov rax, 0x2                ; open syscall
+    lea rdi, [out_file_str]
+    mov rsi, 0x241              ; Flags: O_CREAT (0x40) | O_WRONLY (0x01) | O_TRUNC (0x200)
+    mov rdx, 0o644              ; Permissions: rw-r--r--
+    syscall
+
+    cmp rax, 0x0                ; Error handling
+    jnl lbl_store_data_skip_error
+    call fn_error_exit
+
+    lbl_store_data_skip_error:
+
+    mov r12, rax                ; Save fd in r12
+
+    ; Write the modified XORed buffer into the newly opened file
+    mov rax, 0x1                ; write syscall
+    mov rdi, r12                ; Copy fd to rdi
+    lea rsi, [buf_in]           ; Address of the buffer in rsi
+    mov rdx, [buf_in_len]       ; Bytes to write
+    syscall
+
+    ; Close the fd
+    mov rax, 0x3                ; close syscall
+    mov rdi, r12                ; Copy fd to rdi
+    syscall
+
+    mov rsp, rbp
+    pop rbp
+    ret
 
 ; Function to get the size of a file
 ; Arguments:
@@ -166,12 +179,10 @@ fn_xor_buf:
 
     lea rsi, [buf_in]                   ; Load buf_in address in rsi
     lea rdi, [buf_key]                  ; Load buf_key address in rdi
-    lea rdx, [buf_out]                  ; Load buf_out address in rdx
 
     xor rcx, rcx                        ; Zero out counter
 
     lbl_xor_buf_loop:
-        inc rsi                             ; Modify offset
         movzx rax, byte [rsi]               ; Move byte into al for XOR-ing
         
         inc rdi                             ; Modify offset
@@ -179,13 +190,15 @@ fn_xor_buf:
         xor rax, r9                         ; XORs
 
         inc rdx                             ; Modify offset
-        mov byte [rdx], al                  ; Replace buf_in in-place
+        mov byte [rsi], al                  ; Replace buf_in in-place
+
+        inc rsi                             ; Modify offset
 
         inc rcx
         cmp rcx, qword [buf_in_len]
         jne lbl_xor_buf_loop
 
-    call fn_dbg_print_buf_out
+    call fn_dbg_print_buf_in
 
     mov rsp, rbp
     pop rbp
@@ -197,27 +210,27 @@ main:
     sub rsp, 0x8                ; Stackframe
 
     ; Load input file size
-    lea rdi, [data_file]
+    lea rdi, [in_file_str]
     lea rsi, [stat_buf]
     call fn_stat_file
 
     mov [buf_in_len], rax       ; Store the size of the file
 
     ; Load buffer from input file
-    lea rdi, [data_file]
+    lea rdi, [in_file_str]
     lea rsi, [buf_in]
     mov rdx, qword [buf_in_len]
     call fn_load_file
 
     ; Load key file size
-    lea rdi, [key_file]
+    lea rdi, [key_file_str]
     lea rsi, [stat_buf]
     call fn_stat_file
 
     mov [buf_key_len], rax      ; Store the size of the file
 
     ; Load buffer from key file
-    lea rdi, [key_file]
+    lea rdi, [key_file_str]
     lea rsi, [buf_key]
     mov rdx, qword [buf_key_len]
     call fn_load_file
@@ -225,7 +238,8 @@ main:
     ; Perform XOR of the buffer
     call fn_xor_buf
 
-
+    ; Store result into output file
+    call fn_store_data
 
     mov rsp, rbp
     pop rbp
