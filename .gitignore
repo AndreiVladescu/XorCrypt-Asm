@@ -5,3 +5,4 @@ xorcrypt
 xorcrypt.o
 .gdb_history
 peda-session-xorcrypt.txt
+data.enc
