@@ -167,39 +167,49 @@ fn_load_file:
     pop rbp
     ret
 
-; XORs the buf_in and buf_key and stores it into buf_out
+; XORs the buf_in and buf_key and stores it in buf_in
 ; No arguments needed
 fn_xor_buf:
     push rbp
     mov rbp, rsp
-    sub rsp, 0x8                        ; Stackframe
-    xor r12, r12
+    sub rsp, 0x10                       ; Stackframe
+    push rbx
 
     call fn_dbg_print_buf_in
 
     lea rsi, [buf_in]                   ; Load buf_in address in rsi
     lea rdi, [buf_key]                  ; Load buf_key address in rdi
+    mov rbx, rdi                        ; Save start address of the key string
 
     xor rcx, rcx                        ; Zero out counter
 
     lbl_xor_buf_loop:
-        movzx rax, byte [rsi]               ; Move byte into al for XOR-ing
-        
-        inc rdi                             ; Modify offset
-        movzx r9, byte [rdi]                ; Move byte into r9b for XOR-ing
+        movzx rax, byte [rsi]               ; Move input byte into al for XOR-ing
+        movzx r9, byte [rdi]                ; Move key byte into r9b for XOR-ing
         xor rax, r9                         ; XORs
 
-        inc rdx                             ; Modify offset
         mov byte [rsi], al                  ; Replace buf_in in-place
 
-        inc rsi                             ; Modify offset
+        inc rsi                             ; Modify offset of the input data
+        inc rdi                             ; Modify offset of the key 
+
+        ; Circular looping through the key 
+        sub rdi, rbx                        ; Relative offset
+        cmp rdi, qword [buf_key_len]        ; Compare it to the length of the key
+        jl lbl_xor_buf_skip_modulo              
+        xor rdi, rdi                        ; Zeroes rdi to wrap around the key
+
+    lbl_xor_buf_skip_modulo:
+        add rdi, rbx                        ; Move offset to the key again
 
         inc rcx
+
         cmp rcx, qword [buf_in_len]
         jne lbl_xor_buf_loop
 
     call fn_dbg_print_buf_in
 
+    pop rbx
     mov rsp, rbp
     pop rbp
     ret
