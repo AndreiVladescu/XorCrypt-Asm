@@ -22,6 +22,8 @@ section .text
     global fn_xor_buf
     global fn_stat_file
     global fn_store_data
+    global fn_get_heap_mem
+    global fn_free_heap_mem
 
 ; Functions
 
@@ -108,7 +110,7 @@ fn_store_data:
 fn_stat_file:
     push rbp
     mov rbp, rsp
-    sub rsp, 0x8
+    sub rsp, 0x8                         ; Stackframe
 
     ; Call 'stat'
     mov rax, 4
@@ -126,7 +128,58 @@ fn_stat_file:
     mov rsp, rbp
     pop rbp
     ret
+
+; Deallocated the memory
+; Arguments:
+; buf_addr - rdi - pointer to the address that will be freed
+; buf_len - rsi - the number of bytes to deallocate
+fn_free_heap_mem:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x8                        ; Stackframe
+
+    ; Call 'munmap'
+    mov rax, 0xb
+    ; rdi is the pointer
+    ; rsi is the length
+    syscall
     
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; Allocates memory dynamically on the heap to be more efficient when using smaller files
+; Arguments:
+; buf_len - rsi - the number of bytes to allocate for the buffer 
+; Return value:
+; rax - address of the allocated memory
+fn_get_heap_mem:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x8                        ; Stackframe
+
+    ; Call 'mmap'
+    mov rax, 0x9
+    mov rdi, 0x0                        ; Start address
+    ; rsi is the length
+    mov rdx, 0x3                        ; PROT_READ | PROT_WRITE
+    mov r10, 0x22                       ; MAP_PRIVATE | MAP_ANONYMOUS
+    xor r8, r8
+    not r8                              ; Sets fd = -1, anonmyous mapping
+    mov r9, 0x0                         ; Offset = 0
+    syscall
+
+    ; Check for error
+    cmp rax, -0x1                       ; If -1, then error
+    jne lbl_get_heap_mem_skip_error 
+    call fn_error_exit
+
+    lbl_get_heap_mem_skip_error:
+    mov r12, rax                        ; Store memory pointer in r12
+
+    mov rsp, rbp
+    pop rbp
+    ret
 ; Opens up a file and reads up to buf_in_len bytes into buffer
 ; Arguments:
 ; *input_file_name - rdi - address of the null-terminated file name string
@@ -250,6 +303,7 @@ main:
 
     ; Store result into output file
     call fn_store_data
+
 
     mov rsp, rbp
     pop rbp
