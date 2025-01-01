@@ -3,15 +3,14 @@ section .data
     key_file_str db "key.bin", 0x0
     out_file_str db "data.enc", 0x0
     err_msg db "Program exits due to errors", 0x0
+    ptr_buf_in dq 0x0
+    ptr_buf_key dq 0x0
     buf_in_len dq 0x10
     buf_key_len dq 0x10
     err_msg_len dq 0x1c
     newline db 0xA
 
 section .bss
-    buf_in resb 0x100
-    buf_key resb 0x100
-    padding resb 0x10
     stat_buf resb 144
 
 section .text
@@ -33,10 +32,10 @@ fn_dbg_print_buf_in:
     mov rbp, rsp
     sub rsp, 0x8                ; Stackframe
 
-    ; Print buf_in
+    ; Print input buffer
     mov rax, 1  
     mov rdi, 1
-    lea rsi, [buf_in]
+    mov rsi, [ptr_buf_in]
     mov rdx, qword [buf_in_len]
     syscall
 
@@ -88,7 +87,7 @@ fn_store_data:
     ; Write the modified XORed buffer into the newly opened file
     mov rax, 0x1                ; write syscall
     mov rdi, r12                ; Copy fd to rdi
-    lea rsi, [buf_in]           ; Address of the buffer in rsi
+    mov rsi, [ptr_buf_in]           ; Address of the buffer in rsi
     mov rdx, [buf_in_len]       ; Bytes to write
     syscall
 
@@ -143,7 +142,7 @@ fn_free_heap_mem:
     ; rdi is the pointer
     ; rsi is the length
     syscall
-    
+
     mov rsp, rbp
     pop rbp
     ret
@@ -220,7 +219,7 @@ fn_load_file:
     pop rbp
     ret
 
-; XORs the buf_in and buf_key and stores it in buf_in
+; XORs *ptr_buf_in and *ptr_buf_key and stores it in *ptr_buf_in
 ; No arguments needed
 fn_xor_buf:
     push rbp
@@ -230,8 +229,8 @@ fn_xor_buf:
 
     call fn_dbg_print_buf_in
 
-    lea rsi, [buf_in]                   ; Load buf_in address in rsi
-    lea rdi, [buf_key]                  ; Load buf_key address in rdi
+    mov rsi, [ptr_buf_in]               ; Load buf_in address in rsi
+    mov rdi, [ptr_buf_key]              ; Load buf_key address in rdi
     mov rbx, rdi                        ; Save start address of the key string
 
     xor rcx, rcx                        ; Zero out counter
@@ -279,9 +278,14 @@ main:
 
     mov [buf_in_len], rax       ; Store the size of the file
 
+    ; Allocate memory for the input data buffer
+    mov rsi, [buf_in_len]
+    call fn_get_heap_mem
+    mov [ptr_buf_in], rax
+
     ; Load buffer from input file
     lea rdi, [in_file_str]
-    lea rsi, [buf_in]
+    mov rsi, [ptr_buf_in]
     mov rdx, qword [buf_in_len]
     call fn_load_file
 
@@ -292,9 +296,14 @@ main:
 
     mov [buf_key_len], rax      ; Store the size of the file
 
+    ; Allocate memory for the input data buffer
+    mov rsi, [buf_key_len]
+    call fn_get_heap_mem
+    mov [ptr_buf_key], rax
+
     ; Load buffer from key file
     lea rdi, [key_file_str]
-    lea rsi, [buf_key]
+    mov rsi, [ptr_buf_key]
     mov rdx, qword [buf_key_len]
     call fn_load_file
 
@@ -304,6 +313,14 @@ main:
     ; Store result into output file
     call fn_store_data
 
+    ; Deallocate memory for the data and key buffers
+    mov rdi, [ptr_buf_in]
+    mov rsi, [buf_in_len]
+    call fn_free_heap_mem
+
+    mov rdi, [ptr_buf_key]
+    mov rsi, [buf_key_len]
+    call fn_free_heap_mem
 
     mov rsp, rbp
     pop rbp
@@ -311,11 +328,10 @@ main:
 
 _start:
     mov rbp, rsp
-    
+
     call main
 
     ; Exit the program
-    ; exit syscall
-    mov rax, 60
-    mov rdi, 0
+    mov rax, 0x3c               ; exit syscall
+    mov rdi, 0x0
     syscall
