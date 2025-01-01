@@ -1,10 +1,10 @@
 section .data
-    in_file_str db "data.dat", 0x0
-    key_file_str db "key.bin", 0x0
-    out_file_str db "data.enc", 0x0
     err_msg db "Program exits due to errors", 0x0
     ptr_buf_in dq 0x0
     ptr_buf_key dq 0x0
+    ptr_in_file_str dq 0x0
+    ptr_key_file_str dq 0x0
+    ptr_out_file_str dq 0x0
     buf_in_len dq 0x10
     buf_key_len dq 0x10
     err_msg_len dq 0x1c
@@ -23,6 +23,7 @@ section .text
     global fn_store_data
     global fn_get_heap_mem
     global fn_free_heap_mem
+    global fn_load_args
 
 ; Functions
 
@@ -71,7 +72,7 @@ fn_store_data:
 
     ; Open the file
     mov rax, 0x2                ; open syscall
-    lea rdi, [out_file_str]
+    mov rdi, [ptr_out_file_str]
     mov rsi, 0x241              ; Flags: O_CREAT (0x40) | O_WRONLY (0x01) | O_TRUNC (0x200)
     mov rdx, 0o644              ; Permissions: rw-r--r--
     syscall
@@ -266,13 +267,45 @@ fn_xor_buf:
     pop rbp
     ret
 
+; Verifies wheter there are a number of 4 arguments (including the program itself)
+; Will load the addresses to the strings in the pointer variables
+; Argument 1: input file name
+; Argument 2: key file name
+; Argument 3: output file name
+fn_load_args:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x8                ; Stackframe
+
+    mov rax, qword [rsp + 0x30] ; argc
+    cmp rax, 0x4
+    je lbl_load_args_skip_error
+    call fn_error_exit
+
+    lbl_load_args_skip_error:
+
+    ; Load arguments' addresses to pointer
+    mov rax, qword [rsp + 0x40] ; arg1
+    mov [ptr_in_file_str], rax
+    mov rax, qword [rsp + 0x48] ; arg2
+    mov [ptr_key_file_str], rax
+    mov rax, qword [rsp + 0x50] ; arg3
+    mov [ptr_out_file_str], rax
+
+    mov rsp, rbp
+    pop rbp
+    ret
+
 main:
     push rbp
     mov rbp, rsp
     sub rsp, 0x8                ; Stackframe
 
+    ; Verify if arguments are the correct number
+    call fn_load_args
+
     ; Load input file size
-    lea rdi, [in_file_str]
+    mov rdi, [ptr_in_file_str]
     lea rsi, [stat_buf]
     call fn_stat_file
 
@@ -284,13 +317,13 @@ main:
     mov [ptr_buf_in], rax
 
     ; Load buffer from input file
-    lea rdi, [in_file_str]
+    mov rdi, [ptr_in_file_str]
     mov rsi, [ptr_buf_in]
     mov rdx, qword [buf_in_len]
     call fn_load_file
 
     ; Load key file size
-    lea rdi, [key_file_str]
+    mov rdi, [ptr_key_file_str]
     lea rsi, [stat_buf]
     call fn_stat_file
 
@@ -302,7 +335,7 @@ main:
     mov [ptr_buf_key], rax
 
     ; Load buffer from key file
-    lea rdi, [key_file_str]
+    mov rdi, [ptr_key_file_str]
     mov rsi, [ptr_buf_key]
     mov rdx, qword [buf_key_len]
     call fn_load_file
