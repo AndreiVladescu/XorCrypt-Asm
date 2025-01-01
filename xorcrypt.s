@@ -24,7 +24,7 @@ section .text
     global fn_get_heap_mem
     global fn_free_heap_mem
     global fn_load_args
-
+    global fn_xor_buf_ymm
 ; Functions
 
 ; Debug prints function only
@@ -221,6 +221,36 @@ fn_load_file:
     ret
 
 ; XORs *ptr_buf_in and *ptr_buf_key and stores it in *ptr_buf_in
+; The function is optimized using 256 bit YMM registers
+; No arguments needed
+fn_xor_buf_ymm:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 0x10                       ; Stackframe
+
+    mov rsi, [ptr_buf_in]               ; Load buf_in address in rsi
+    mov rdi, [ptr_buf_key]              ; Load buf_key address in rdi
+    
+    xor rcx, rcx                        ; Zero out counter
+
+    lbl_xor_buf_ymm_loop:
+        vmovdqa ymm0, [rsi]             ; Load 256 bits from address in ymm0
+        vmovdqa ymm1, [rdi]             ; Load 256 bits from address in ymm0
+
+        vpxor ymm0, ymm0, ymm1              ; Perform XOR: ymm0 = ymm0 ^ ymm1
+        vmovdqa [rsi], ymm0                 ; Store 256 bits (32 bytes) from ymm0 into result buffer
+        
+        add rsi, 0x100
+        
+        add rcx, 0x100
+        cmp rcx, qword [buf_in_len]
+        jl lbl_xor_buf_ymm_loop
+
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; XORs *ptr_buf_in and *ptr_buf_key and stores it in *ptr_buf_in
 ; No arguments needed
 fn_xor_buf:
     push rbp
@@ -228,7 +258,7 @@ fn_xor_buf:
     sub rsp, 0x10                       ; Stackframe
     push rbx
 
-    call fn_dbg_print_buf_in
+    ; call fn_dbg_print_buf_in
 
     mov rsi, [ptr_buf_in]               ; Load buf_in address in rsi
     mov rdi, [ptr_buf_key]              ; Load buf_key address in rdi
@@ -260,7 +290,7 @@ fn_xor_buf:
         cmp rcx, qword [buf_in_len]
         jne lbl_xor_buf_loop
 
-    call fn_dbg_print_buf_in
+    ; call fn_dbg_print_buf_in
 
     pop rbx
     mov rsp, rbp
@@ -341,7 +371,8 @@ main:
     call fn_load_file
 
     ; Perform XOR of the buffer
-    call fn_xor_buf
+    ;call fn_xor_buf
+    call fn_xor_buf_ymm
 
     ; Store result into output file
     call fn_store_data
