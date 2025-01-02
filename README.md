@@ -103,4 +103,12 @@ I tested 10 times for each run and picked the median time, so as not to skew the
 
 ![Benchmark Graph](benchmark.jpg)
 
+Median times 100MB:
+* AVX2 - 0.17s
+* GPR - 0.24s
+
+Median times 1GB:
+* AVX2 - 1.63s
+* GPR - 2.42s
+
 I tested with and without writing to the disk - when just the XOR was performed, without actual writing, the tests were similar, no difference was shown, so some optimizations may have been run by the OS/CPU.
