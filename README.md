@@ -95,12 +95,13 @@ Ryzen 5 5600U, 32GB RAM, Linux Mint 22 (Host OS)
 
 ### Test parameters
 
-The benchmark is made using a python script, that will call `subprocess` for each variant of the XorCrypt, AVX2 and GPR. Test bins are 100MB and 1GB random data from `/dev/urandom`:
+The benchmark is made using a python script, that will call `subprocess` for each variant of the XorCrypt, AVX2, GPR and a C program that compiles with `gcc -O3` and `gcc -O0`. Test bins are 100MB and 1GB random data from `/dev/urandom`:
 ```bash
 dd if=/dev/urandom of=random_1GB.data bs=1M count=1000 status=progress
 ```
 I tested 10 times for each run and picked the median time, so as not to skew the benchmark with outliers, such as caching the memory inside CPU.
 
+#### Benchmark of only xorcrypt with assembly
 ![Benchmark Graph](benchmark.jpg)
 
 Median times 100MB:
@@ -110,5 +111,21 @@ Median times 100MB:
 Median times 1GB:
 * AVX2 - 1.63s
 * GPR - 2.42s
+
+#### Benchmark of all variants, including C programs
+
+![Benchmark Graph](benchmark_avr_gpr_C.png)
+
+Median times 100MB:
+* AVX2 - 0.175s
+* GPR - 0.249s
+* C gcc -O3 - 0.368s
+* C gcc -O0 - 0.380s
+ 
+Median times 1GB:
+* AVX2 - 1.691s
+* GPR - 2.472s
+* C gcc -O3 - 3.750s
+* C gcc -O0 - 3.635s
 
 I tested with and without writing to the disk - when just the XOR was performed, without actual writing, the tests were similar, no difference was shown, so some optimizations may have been run by the OS/CPU.
