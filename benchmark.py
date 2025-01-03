@@ -6,7 +6,9 @@ import numpy as np
 
 programs = {
     "./xorcrypt_avx2": "red",
-    "./xorcrypt_gpr": "green"
+    "./xorcrypt_gpr": "green",
+    "./xorcrypt_C_O3": "blue",
+    "./xorcrypt_C_O0": "yellow"
 }
 
 parameters = [
@@ -42,15 +44,19 @@ indices = np.arange(len(parameters))  # Indices for parameter groups
 
 avx2_times = [results[param]["./xorcrypt_avx2"] for param in parameters]
 gpr_times = [results[param]["./xorcrypt_gpr"] for param in parameters]
+co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
+co3_times = [results[param]["./xorcrypt_C_O3"] for param in parameters]
 
 plt.figure(figsize=(10, 6))
 plt.bar(indices - bar_width / 2, avx2_times, bar_width, label="AVX2", color="red")
 plt.bar(indices + bar_width / 2, gpr_times, bar_width, label="GPR", color="green")
+plt.bar(indices + bar_width / 2, co0_times, bar_width, label="C O0", color="yellow")
+plt.bar(indices + bar_width / 2, co3_times, bar_width, label="C O3", color="blue")
 
 plt.xticks(indices, parameters)
 plt.xlabel("File Size")
 plt.ylabel("Median Time (s)")
-plt.title("Benchmark Results for AVX2 and GPR Variants")
+plt.title("Benchmark Results for AVX2, GPR, C -O0 and -O3 Variants")
 plt.legend()
 plt.tight_layout()
 
