@@ -5,10 +5,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 programs = {
-    "./xorcrypt_avx2": "red",
-    "./xorcrypt_gpr": "green",
-    "./xorcrypt_C_O3": "blue",
-    "./xorcrypt_C_O0": "yellow"
+    "./xorcrypt_avx2": "#FF6F61",  # Coral Red
+    "./xorcrypt_gpr": "#6BAED6",  # Sky Blue
+    "./xorcrypt_C_O0": "#C7E9C0",  # Light Green
+    "./xorcrypt_C_O3": "#D95F02",  # Orange
 }
 
 parameters = [
@@ -39,25 +39,30 @@ for program, color in programs.items():
         results[param][program] = median_time
         print(f"Median time for {program} with {param}: {median_time:.4f} seconds")
 
-bar_width = 0.35  # Width of each bar
+bar_width = 0.2  # Width of each bar
 indices = np.arange(len(parameters))  # Indices for parameter groups
 
+# Extract times for each program
 avx2_times = [results[param]["./xorcrypt_avx2"] for param in parameters]
 gpr_times = [results[param]["./xorcrypt_gpr"] for param in parameters]
-co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
 co3_times = [results[param]["./xorcrypt_C_O3"] for param in parameters]
+co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
 
-plt.figure(figsize=(10, 6))
-plt.bar(indices - bar_width / 2, avx2_times, bar_width, label="AVX2", color="red")
-plt.bar(indices + bar_width / 2, gpr_times, bar_width, label="GPR", color="green")
-plt.bar(indices + bar_width / 2, co0_times, bar_width, label="C O0", color="yellow")
-plt.bar(indices + bar_width / 2, co3_times, bar_width, label="C O3", color="blue")
+plt.figure(figsize=(12, 6))
 
+# Plot bars for each program in ascending order
+plt.bar(indices - 1.5 * bar_width, avx2_times, bar_width, label="AVX2", color=programs["./xorcrypt_avx2"])
+plt.bar(indices - 0.5 * bar_width, gpr_times, bar_width, label="GPR", color=programs["./xorcrypt_gpr"])
+plt.bar(indices + 0.5 * bar_width, co0_times, bar_width, label="C O0", color=programs["./xorcrypt_C_O0"])
+plt.bar(indices + 1.5 * bar_width, co3_times, bar_width, label="C O3", color=programs["./xorcrypt_C_O3"])
+
+# Formatting the chart
 plt.xticks(indices, parameters)
 plt.xlabel("File Size")
 plt.ylabel("Median Time (s)")
-plt.title("Benchmark Results for AVX2, GPR, C -O0 and -O3 Variants")
+plt.title("Benchmark Results for AVX2, GPR, C -O0 and -O3 Variants (Rearranged)")
 plt.legend()
 plt.tight_layout()
 
 plt.show()
+
