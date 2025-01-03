@@ -6,9 +6,9 @@ import numpy as np
 
 programs = {
     "./xorcrypt_avx2": "red",
-    "./xorcrypt_gpr": "green",
-    "./xorcrypt_C_O3": "blue",
-    "./xorcrypt_C_O0": "yellow"
+    "./xorcrypt_gpr": "orange",
+    "./xorcrypt_C_O3": "green",
+    "./xorcrypt_C_O0": "#3366FF"  # Slightly greenish blue
 }
 
 parameters = [
@@ -39,20 +39,24 @@ for program, color in programs.items():
         results[param][program] = median_time
         print(f"Median time for {program} with {param}: {median_time:.4f} seconds")
 
-bar_width = 0.35  # Width of each bar
+bar_width = 0.2  # Width of each bar
 indices = np.arange(len(parameters))  # Indices for parameter groups
 
+# Extract times for each program
 avx2_times = [results[param]["./xorcrypt_avx2"] for param in parameters]
 gpr_times = [results[param]["./xorcrypt_gpr"] for param in parameters]
 co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
 co3_times = [results[param]["./xorcrypt_C_O3"] for param in parameters]
 
-plt.figure(figsize=(10, 6))
-plt.bar(indices - bar_width / 2, avx2_times, bar_width, label="AVX2", color="red")
-plt.bar(indices + bar_width / 2, gpr_times, bar_width, label="GPR", color="green")
-plt.bar(indices + bar_width / 2, co0_times, bar_width, label="C O0", color="yellow")
-plt.bar(indices + bar_width / 2, co3_times, bar_width, label="C O3", color="blue")
+plt.figure(figsize=(12, 6))
 
+# Plot bars for each program
+plt.bar(indices - 1.5 * bar_width, avx2_times, bar_width, label="AVX2", color="red")
+plt.bar(indices - 0.5 * bar_width, gpr_times, bar_width, label="GPR", color="orange")
+plt.bar(indices + 0.5 * bar_width, co0_times, bar_width, label="C O0", color="#3366FF")  # Slightly greenish blue
+plt.bar(indices + 1.5 * bar_width, co3_times, bar_width, label="C O3", color="green")
+
+# Formatting the chart
 plt.xticks(indices, parameters)
 plt.xlabel("File Size")
 plt.ylabel("Median Time (s)")
