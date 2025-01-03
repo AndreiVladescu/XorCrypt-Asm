@@ -6,3 +6,6 @@ xorcrypt.o
 .gdb_history
 peda-session-xorcrypt.txt
 data.enc
+xorcrypt_C
+xorcrypt_C_O0
+xorcrypt_C_O3
