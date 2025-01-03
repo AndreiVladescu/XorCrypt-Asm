@@ -5,10 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 programs = {
-    "./xorcrypt_avx2": "red",
-    "./xorcrypt_gpr": "orange",
-    "./xorcrypt_C_O3": "green",
-    "./xorcrypt_C_O0": "#3366FF"  # Slightly greenish blue
+
+    "./xorcrypt_avx2": "#FF6F61",  # Coral Red
+    "./xorcrypt_gpr": "#6BAED6",  # Sky Blue
+    "./xorcrypt_C_O0": "#C7E9C0",  # Light Green
+    "./xorcrypt_C_O3": "#D95F02",  # Orange
 }
 
 parameters = [
@@ -45,23 +46,25 @@ indices = np.arange(len(parameters))  # Indices for parameter groups
 # Extract times for each program
 avx2_times = [results[param]["./xorcrypt_avx2"] for param in parameters]
 gpr_times = [results[param]["./xorcrypt_gpr"] for param in parameters]
-co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
 co3_times = [results[param]["./xorcrypt_C_O3"] for param in parameters]
+co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
 
 plt.figure(figsize=(12, 6))
 
-# Plot bars for each program
-plt.bar(indices - 1.5 * bar_width, avx2_times, bar_width, label="AVX2", color="red")
-plt.bar(indices - 0.5 * bar_width, gpr_times, bar_width, label="GPR", color="orange")
-plt.bar(indices + 0.5 * bar_width, co0_times, bar_width, label="C O0", color="#3366FF")  # Slightly greenish blue
-plt.bar(indices + 1.5 * bar_width, co3_times, bar_width, label="C O3", color="green")
+
+# Plot bars for each program in ascending order
+plt.bar(indices - 1.5 * bar_width, avx2_times, bar_width, label="AVX2", color=programs["./xorcrypt_avx2"])
+plt.bar(indices - 0.5 * bar_width, gpr_times, bar_width, label="GPR", color=programs["./xorcrypt_gpr"])
+plt.bar(indices + 0.5 * bar_width, co0_times, bar_width, label="C O0", color=programs["./xorcrypt_C_O0"])
+plt.bar(indices + 1.5 * bar_width, co3_times, bar_width, label="C O3", color=programs["./xorcrypt_C_O3"])
 
 # Formatting the chart
 plt.xticks(indices, parameters)
 plt.xlabel("File Size")
 plt.ylabel("Median Time (s)")
-plt.title("Benchmark Results for AVX2, GPR, C -O0 and -O3 Variants")
+plt.title("Benchmark Results for AVX2, GPR, C -O0 and -O3 Variants (Rearranged)")
 plt.legend()
 plt.tight_layout()
 
 plt.show()
+
