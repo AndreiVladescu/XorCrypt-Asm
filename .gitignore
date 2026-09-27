@@ -9,3 +9,11 @@ data.enc
 xorcrypt_C
 xorcrypt_C_O0
 xorcrypt_C_O3
+xorcrypt_avx2
+xorcrypt_gpr
+xorcrypt_noxor
+xorcrypt_C_keydef
+*.o
+random_*.data
+blank.out
+data.out

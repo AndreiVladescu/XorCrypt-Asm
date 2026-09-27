@@ -1,70 +1,121 @@
+import hashlib
+import os
 import subprocess
-import time
 import statistics
+import sys
+import time
+
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Build everything with `make` first
 programs = {
-
-    "./xorcrypt_avx2": "#FF6F61",  # Coral Red
-    "./xorcrypt_gpr": "#6BAED6",  # Sky Blue
-    "./xorcrypt_C_O0": "#C7E9C0",  # Light Green
-    "./xorcrypt_C_O3": "#D95F02",  # Orange
+    "./xorcrypt_noxor": ("I/O only (no XOR)", "#BDBDBD"),  # Grey
+    "./xorcrypt_avx2": ("ASM AVX2", "#FF6F61"),  # Coral Red
+    "./xorcrypt_gpr": ("ASM GPR", "#6BAED6"),  # Sky Blue
+    "./xorcrypt_C_O0": ("C -O0", "#C7E9C0"),  # Light Green
+    "./xorcrypt_C_O3": ("C -O3", "#D95F02"),  # Orange
+    "./xorcrypt_C_keydef": ("C -O3 KEY_SIZE define", "#7570B3"),  # Purple
 }
 
-parameters = [
-    "100MB",
-    "1GB"
-]
-
-file_mapping = {
-    "100MB": ["random_100MB.data", "key.bin", "blank.out"],
-    "1GB": ["random_1GB.data", "key.bin", "blank.out"]
+sizes = {
+    "100MB": ("random_100MB.data", 100 * 1024 * 1024),
+    "1GB": ("random_1GB.data", 1000 * 1024 * 1024),
 }
 
-def benchmark(program, params, runs=10):
-    times = []
-    for _ in range(runs):
-        start_time = time.time()
-        subprocess.run([program] + params, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elapsed_time = time.time() - start_time
-        times.append(elapsed_time)
-    return statistics.median(times)
+key_file = "key.bin"
+out_file = "blank.out"
+runs = 10
 
-results = {param: {} for param in parameters}
 
-for program, color in programs.items():
-    for param in parameters:
-        param_files = file_mapping[param]
-        median_time = benchmark(program, param_files)
-        results[param][program] = median_time
-        print(f"Median time for {program} with {param}: {median_time:.4f} seconds")
+def make_test_file(path, size):
+    # Same as: dd if=/dev/urandom of=<path> bs=1M count=<size in MB>
+    if os.path.exists(path) and os.path.getsize(path) == size:
+        return
+    print(f"Generating {path}...")
+    with open(path, "wb") as f:
+        for _ in range(size // (1024 * 1024)):
+            f.write(os.urandom(1024 * 1024))
 
-bar_width = 0.2  # Width of each bar
-indices = np.arange(len(parameters))  # Indices for parameter groups
 
-# Extract times for each program
-avx2_times = [results[param]["./xorcrypt_avx2"] for param in parameters]
-gpr_times = [results[param]["./xorcrypt_gpr"] for param in parameters]
-co3_times = [results[param]["./xorcrypt_C_O3"] for param in parameters]
-co0_times = [results[param]["./xorcrypt_C_O0"] for param in parameters]
+def expected_hash(data_path, key):
+    # Reference XOR in numpy, in chunks that are a multiple of the key length
+    # so the key lines up at the start of every chunk
+    h = hashlib.sha256()
+    key_arr = np.frombuffer(key, dtype=np.uint8)
+    chunk = len(key) * (4 * 1024 * 1024)
+    with open(data_path, "rb") as f:
+        while block := f.read(chunk):
+            data = np.frombuffer(block, dtype=np.uint8)
+            h.update((data ^ np.resize(key_arr, len(data))).tobytes())
+    return h.hexdigest()
+
+
+def file_hash(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while block := f.read(16 * 1024 * 1024):
+            h.update(block)
+    return h.hexdigest()
+
+
+def run(program, data_path):
+    start = time.perf_counter()
+    result = subprocess.run([program, data_path, key_file, out_file],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    elapsed = time.perf_counter() - start
+    if result.returncode != 0:
+        sys.exit(f"{program} failed: {result.stderr.decode().strip()}")
+    return elapsed
+
+
+def benchmark(program, data_path, expected):
+    # Warm-up run, also used to check that the program produces the right output.
+    # A fast wrong answer is not a benchmark result.
+    run(program, data_path)
+    if expected is not None and file_hash(out_file) != expected:
+        sys.exit(f"{program} produced WRONG output for {data_path}")
+    return statistics.median(run(program, data_path) for _ in range(runs))
+
+
+for program in programs:
+    if not os.path.exists(program):
+        sys.exit(f"{program} not found, run `make` first")
+
+with open(key_file, "rb") as f:
+    key = f.read()
+
+results = {size: {} for size in sizes}
+
+for size, (data_path, byte_count) in sizes.items():
+    make_test_file(data_path, byte_count)
+    expected = expected_hash(data_path, key)
+    for program, (label, _) in programs.items():
+        # The no-XOR baseline copies the input unchanged, so don't verify it
+        check = None if program == "./xorcrypt_noxor" else expected
+        median_time = benchmark(program, data_path, check)
+        results[size][program] = median_time
+        print(f"Median time for {label:22s} with {size}: {median_time:.4f} seconds")
+
+os.remove(out_file)
+
+bar_width = 0.8 / len(programs)  # Width of each bar
+indices = np.arange(len(sizes))  # Indices for size groups
 
 plt.figure(figsize=(12, 6))
 
-
-# Plot bars for each program in ascending order
-plt.bar(indices - 1.5 * bar_width, avx2_times, bar_width, label="AVX2", color=programs["./xorcrypt_avx2"])
-plt.bar(indices - 0.5 * bar_width, gpr_times, bar_width, label="GPR", color=programs["./xorcrypt_gpr"])
-plt.bar(indices + 0.5 * bar_width, co0_times, bar_width, label="C O0", color=programs["./xorcrypt_C_O0"])
-plt.bar(indices + 1.5 * bar_width, co3_times, bar_width, label="C O3", color=programs["./xorcrypt_C_O3"])
+for n, (program, (label, color)) in enumerate(programs.items()):
+    offset = (n - (len(programs) - 1) / 2) * bar_width
+    times = [results[size][program] for size in sizes]
+    plt.bar(indices + offset, times, bar_width, label=label, color=color)
 
 # Formatting the chart
-plt.xticks(indices, parameters)
+plt.xticks(indices, list(sizes))
 plt.xlabel("File Size")
 plt.ylabel("Median Time (s)")
-plt.title("Benchmark Results for AVX2, GPR, C -O0 and -O3 Variants (Rearranged)")
+plt.title("XorCrypt benchmark (whole program: read + XOR + write)")
 plt.legend()
 plt.tight_layout()
 
+plt.savefig("benchmark.png")
 plt.show()
-

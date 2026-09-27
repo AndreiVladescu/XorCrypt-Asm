@@ -26,15 +26,16 @@ make && \
 
 ```
 
-To enable YMM or disable it, comment one of the lines:
+`make` builds every variant from the same sources:
 
-```asm
-
-call fn_xor_buf
-
-call fn_xor_buf_ymm
-
-```
+| Binary | What it is |
+|---|---|
+| `xorcrypt` / `xorcrypt_avx2` | Assembly, AVX2 YMM version (default) |
+| `xorcrypt_gpr` | Assembly, byte-by-byte version (`nasm -DUSE_GPR`) |
+| `xorcrypt_noxor` | Assembly, reads and writes the files without XOR-ing (`nasm -DNO_XOR`), the I/O baseline for the benchmark |
+| `xorcrypt_C_O0` | `xorcrypt.c` with `gcc -O0` |
+| `xorcrypt_C_O3` | `xorcrypt.c` with `gcc -O3 -march=native` |
+| `xorcrypt_C_keydef` | `xorcrypt_keydef.c`, key size fixed at compile time with `#define KEY_SIZE` (default 32, change with `make KEY_SIZE=64`). The key file must be exactly `KEY_SIZE` bytes |
 
   
 
@@ -50,11 +51,11 @@ The program can be used in 2 modes:
 
   
 
-The byte-by-byte, while slower, has a key-wrapping feature, where if the key is smaller than the data file, it will wrap itself around it so it can XOR all the bytes. Also, it works with files that don't divide by 32 bytes.
+Both versions wrap the key around the data if the key is smaller than the data file, and both work with files of any size.
 
   
 
-The YMM version is a lot faster (benchmarks below), since it uses vector operations, `vmovqda` but is not yet patched to work with non-divisible sizes.
+The YMM version XORs 32 bytes at a time with `vmovdqa`/`vpxor`. The leftover bytes at the end of a file that doesn't divide by 32 are XORed one by one. The vector loop needs the key length to be a multiple of 32 bytes; for other key lengths it falls back to the byte-by-byte loop.
 
   
 
@@ -100,6 +101,16 @@ The benchmark is made using a python script, that will call `subprocess` for eac
 dd if=/dev/urandom of=random_1GB.data bs=1M count=1000 status=progress
 ```
 I tested 10 times for each run and picked the median time, so as not to skew the benchmark with outliers, such as caching the memory inside CPU.
+
+`benchmark.py` generates the random test files if they are missing, checks every program's output against a reference XOR before timing it, and saves the chart to `benchmark.png`. It times the whole program (start-up, reading, XOR, writing). Compare each result with the `I/O only` bar to see how much time the XOR itself takes.
+
+### Old results (invalid)
+
+The results below were measured with bugs that made the comparison unfair:
+
+* The AVX2 loop advanced by `0x100` (256 **bytes**) instead of `0x20` (256 bits = 32 bytes), so it only XORed 1/8 of the file. Its time was essentially the I/O time.
+* The C loop used `key_buffer[i % key_size]`, a 64-bit division per byte that also stops gcc from vectorizing. That is why `-O0` and `-O3` were almost the same. The C code now walks the data in key-sized blocks.
+* The outputs were never checked, so the wrong AVX2 output went unnoticed.
 
 #### Benchmark of only xorcrypt with assembly
 ![Benchmark Graph](benchmark.jpg)

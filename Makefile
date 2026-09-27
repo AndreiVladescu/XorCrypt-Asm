@@ -1,19 +1,41 @@
-all: xorcrypt xorcrypt_C_O3 xorcrypt_C_O0
+CC = gcc
+NASM = nasm
+# Key size baked into xorcrypt_C_keydef, must match the size of the key file
+KEY_SIZE ?= 32
 
-xorcrypt: xorcrypt.o
-	ld xorcrypt.o -o xorcrypt
-	
-xorcrypt.o: xorcrypt.s
-	nasm -f elf64 xorcrypt.s -o xorcrypt.o
+BINS = xorcrypt xorcrypt_avx2 xorcrypt_gpr xorcrypt_noxor \
+       xorcrypt_C_O0 xorcrypt_C_O3 xorcrypt_C_keydef
 
-xorcrypt_C_O0:
-	gcc -O0 xorcrypt.c -o xorcrypt_C_O0
+all: $(BINS)
 
-xorcrypt_C_O3:
-	gcc -O3 xorcrypt.c -o xorcrypt_C_O3
+# Assembly variants, selected with -D flags in xorcrypt.s
+xorcrypt: xorcrypt_avx2
+	cp $< $@
+
+xorcrypt_avx2: xorcrypt.s
+	$(NASM) -f elf64 $< -o $@.o
+	ld $@.o -o $@
+
+xorcrypt_gpr: xorcrypt.s
+	$(NASM) -f elf64 -DUSE_GPR $< -o $@.o
+	ld $@.o -o $@
+
+# No XOR, only reads and writes the files: the I/O baseline for the benchmark
+xorcrypt_noxor: xorcrypt.s
+	$(NASM) -f elf64 -DNO_XOR $< -o $@.o
+	ld $@.o -o $@
+
+# C variants. -march=native lets gcc use AVX2 like the assembly version does
+xorcrypt_C_O0: xorcrypt.c
+	$(CC) -O0 $< -o $@
+
+xorcrypt_C_O3: xorcrypt.c
+	$(CC) -O3 -march=native $< -o $@
+
+xorcrypt_C_keydef: xorcrypt_keydef.c
+	$(CC) -O3 -march=native -DKEY_SIZE=$(KEY_SIZE) $< -o $@
 
 clean:
-	rm -f xorcrypt
-	rm -f xorcrypt.o
-	rm -f xorcrypt_C_O0
-	rm -r xorcrypt_C_O3
+	rm -f $(BINS) *.o
+
+.PHONY: all clean

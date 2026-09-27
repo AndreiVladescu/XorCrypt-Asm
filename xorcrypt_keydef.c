@@ -6,6 +6,12 @@
 #include <sys/types.h>
 #include <errno.h>
 
+// Key size fixed at compile time, override with: gcc -DKEY_SIZE=64 ...
+// The key file must be exactly KEY_SIZE bytes long.
+#ifndef KEY_SIZE
+#define KEY_SIZE 32
+#endif
+
 void handle_error(const char *msg) {
     perror(msg);
     exit(EXIT_FAILURE);
@@ -82,29 +88,25 @@ int main(int argc, char *argv[]) {
         handle_error("Failed to stat key file");
     }
 
-    // Allocate memory for key buffer
-    size_t key_size = key_stat.st_size;
-    if (key_size == 0) {
-        fprintf(stderr, "Key file is empty\n");
+    // The key size is known at compile time, so the key lives on the stack
+    if (key_stat.st_size != KEY_SIZE) {
+        fprintf(stderr, "Key file must be exactly %d bytes (built with KEY_SIZE=%d)\n", KEY_SIZE, KEY_SIZE);
         exit(EXIT_FAILURE);
     }
-    unsigned char *key_buffer = malloc(key_size);
-    if (!key_buffer) {
-        handle_error("Failed to allocate memory for key buffer");
-    }
+    unsigned char key_buffer[KEY_SIZE];
 
     // Read key file into buffer
-    read_all(key_fd, key_buffer, key_size, "Failed to read key file");
+    read_all(key_fd, key_buffer, KEY_SIZE, "Failed to read key file");
 
     close(key_fd);
 
     // Perform XOR
-    // Walk the data in key-sized blocks instead of using key_buffer[i % key_size]:
-    // the modulo is a division per byte and stops the compiler from vectorizing.
-    // The inner loop has no dependency on i, so gcc -O3 turns it into SIMD code.
+    // Same blocked loop as xorcrypt.c, but KEY_SIZE is a constant, so the
+    // compiler fully unrolls the inner loop into a fixed number of SIMD ops.
+    // (key_buffer[i % KEY_SIZE] would still be ~5x slower, even with a constant.)
     size_t i = 0;
-    for (; i + key_size <= data_size; i += key_size) {
-        for (size_t j = 0; j < key_size; ++j) {
+    for (; i + KEY_SIZE <= data_size; i += KEY_SIZE) {
+        for (size_t j = 0; j < KEY_SIZE; ++j) {
             data_buffer[i + j] ^= key_buffer[j];
         }
     }
@@ -112,8 +114,6 @@ int main(int argc, char *argv[]) {
     for (size_t j = 0; i < data_size; ++i, ++j) {
         data_buffer[i] ^= key_buffer[j];
     }
-
-    free(key_buffer);
 
     // Open output file for writing
     output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);

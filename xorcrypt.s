@@ -1,5 +1,5 @@
 section .data
-    err_msg db "Program exits due to errors", 0x0
+    err_msg db "Program exits due to errors", 0xA
     ptr_buf_in dq 0x0
     ptr_buf_key dq 0x0
     ptr_in_file_str dq 0x0
@@ -53,9 +53,9 @@ fn_dbg_print_buf_in:
 
 ; Function to exit
 fn_error_exit:
-    ; Print error message
+    ; Print error message to stderr
     mov rax, 1  
-    mov rdi, 1
+    mov rdi, 2
     lea rsi, [err_msg]
     movzx rdx, byte [err_msg_len]
     syscall
@@ -68,7 +68,8 @@ fn_error_exit:
 fn_store_data:
     push rbp
     mov rbp, rsp
-    sub rsp, 0x8                ; Stackframe  
+    push r12
+    push r13
 
     ; Open the file
     mov rax, 0x2                ; open syscall
@@ -85,19 +86,38 @@ fn_store_data:
 
     mov r12, rax                ; Save fd in r12
 
-    ; Write the modified XORed buffer into the newly opened file
-    mov rax, 0x1                ; write syscall
-    mov rdi, r12                ; Copy fd to rdi
-    mov rsi, [ptr_buf_in]           ; Address of the buffer in rsi
-    mov rdx, [buf_in_len]       ; Bytes to write
-    syscall
+    xor r13, r13                ; Bytes written so far
 
+    ; Write the modified XORed buffer into the newly opened file
+    ; write() may write less than requested, so loop until everything is out
+    lbl_store_data_write_loop:
+        cmp r13, qword [buf_in_len]
+        jae lbl_store_data_write_done
+
+        mov rax, 0x1                ; write syscall
+        mov rdi, r12                ; Copy fd to rdi
+        mov rsi, [ptr_buf_in]       ; Address of the buffer
+        add rsi, r13                ; + bytes already written
+        mov rdx, [buf_in_len]       ; Bytes left to write
+        sub rdx, r13
+        syscall
+
+        cmp rax, 0x0                ; Error handling
+        jg lbl_store_data_write_ok
+        call fn_error_exit
+
+    lbl_store_data_write_ok:
+        add r13, rax
+        jmp lbl_store_data_write_loop
+
+    lbl_store_data_write_done:
     ; Close the fd
     mov rax, 0x3                ; close syscall
     mov rdi, r12                ; Copy fd to rdi
     syscall
 
-    mov rsp, rbp
+    pop r13
+    pop r12
     pop rbp
     ret
 
@@ -169,18 +189,16 @@ fn_get_heap_mem:
     mov r9, 0x0                         ; Offset = 0
     syscall
 
-    ; Check for error
-    cmp rax, -0x1                       ; If -1, then error
-    jne lbl_get_heap_mem_skip_error 
+    ; Check for error, the kernel returns -errno (-4095..-1)
+    cmp rax, -4095
+    jb lbl_get_heap_mem_skip_error
     call fn_error_exit
 
     lbl_get_heap_mem_skip_error:
-    mov r12, rax                        ; Store memory pointer in r12
-
     mov rsp, rbp
     pop rbp
     ret
-; Opens up a file and reads up to buf_in_len bytes into buffer
+; Opens up a file and reads exactly buf_in_len bytes into buffer
 ; Arguments:
 ; *input_file_name - rdi - address of the null-terminated file name string
 ; *buffer - rsi - address of the buffer
@@ -188,9 +206,13 @@ fn_get_heap_mem:
 fn_load_file:
     push rbp
     mov rbp, rsp
-    sub rsp, 0x18               ; Stackframe
-    push rsi                    ; Preserve address of buffer
-    push rdx                    ; Preserver number of bytes to read
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov r13, rsi                ; Preserve address of buffer
+    mov r14, rdx                ; Preserve number of bytes to read
 
     ; Open the file
     mov rax, 0x2                ; open syscall
@@ -203,49 +225,99 @@ fn_load_file:
     
     lbl_load_file_skip_error:
     mov r12, rax                ; Save fd of file in r12
-     
-    ; Read from the file
-    mov rax, 0x0                        ; read syscall
-    mov rdi, r12                        ; Copy fd to rdi
-    pop rdx                             ; Get rdx from stack
-    pop rsi                             ; Get rsi from stack
-    syscall
+    xor r15, r15                ; Bytes read so far
 
+    ; Read from the file
+    ; read() returns at most ~2GB per call and may return less, so loop
+    lbl_load_file_read_loop:
+        cmp r15, r14
+        jae lbl_load_file_read_done
+
+        mov rax, 0x0                    ; read syscall
+        mov rdi, r12                    ; Copy fd to rdi
+        lea rsi, [r13 + r15]            ; Buffer + bytes already read
+        mov rdx, r14                    ; Bytes left to read
+        sub rdx, r15
+        syscall
+
+        cmp rax, 0x0                    ; Error or unexpected end of file
+        jg lbl_load_file_read_ok
+        call fn_error_exit
+
+    lbl_load_file_read_ok:
+        add r15, rax
+        jmp lbl_load_file_read_loop
+
+    lbl_load_file_read_done:
     ; Close the fd
     mov rax, 0x3                        ; close syscall
     mov rdi, r12                        ; Copy fd to rdi
     syscall
 
-    mov rsp, rbp
+    pop r15
+    pop r14
+    pop r13
+    pop r12
     pop rbp
     ret
 
 ; XORs *ptr_buf_in and *ptr_buf_key and stores it in *ptr_buf_in
-; The function is optimized using 256 bit YMM registers
+; The function is optimized using 256 bit (32 byte) YMM registers
+; The key wraps around the data like in fn_xor_buf. The vector loop needs the
+; key length to be a multiple of 32 bytes, otherwise it falls back to fn_xor_buf.
+; Leftover bytes at the end (data length not divisible by 32) are XORed one by one.
 ; No arguments needed
 fn_xor_buf_ymm:
     push rbp
     mov rbp, rsp
-    sub rsp, 0x10                       ; Stackframe
 
+    mov r8, [buf_key_len]
+    test r8, 0x1f                       ; Key length multiple of 32?
+    jz lbl_xor_buf_ymm_start
+    call fn_xor_buf                     ; No, use the byte-by-byte version
+    jmp lbl_xor_buf_ymm_end
+
+    lbl_xor_buf_ymm_start:
     mov rsi, [ptr_buf_in]               ; Load buf_in address in rsi
     mov rdi, [ptr_buf_key]              ; Load buf_key address in rdi
-    
-    xor rcx, rcx                        ; Zero out counter
+    mov rcx, [buf_in_len]
+    and rcx, -0x20                      ; Bytes that fit in whole 32 byte blocks
+
+    xor rax, rax                        ; Offset in the input data
+    xor rdx, rdx                        ; Offset in the key
 
     lbl_xor_buf_ymm_loop:
-        vmovdqa ymm0, [rsi]             ; Load 256 bits from address in ymm0
-        vmovdqa ymm1, [rdi]             ; Load 256 bits from address in ymm0
+        cmp rax, rcx
+        jae lbl_xor_buf_ymm_tail
 
-        vpxor ymm0, ymm0, ymm1              ; Perform XOR: ymm0 = ymm0 ^ ymm1
-        vmovdqa [rsi], ymm0                 ; Store 256 bits (32 bytes) from ymm0 into result buffer
-        
-        add rsi, 0x100
-        
-        add rcx, 0x100
-        cmp rcx, qword [buf_in_len]
-        jl lbl_xor_buf_ymm_loop
+        vmovdqa ymm0, [rsi + rax]       ; Load 32 bytes of data in ymm0
+        vpxor ymm0, ymm0, [rdi + rdx]   ; XOR with 32 bytes of key: ymm0 = ymm0 ^ key
+        vmovdqa [rsi + rax], ymm0       ; Store 32 bytes back into the buffer
 
+        add rax, 0x20                   ; 256 bits = 32 bytes
+        add rdx, 0x20
+
+        ; Circular looping through the key
+        cmp rdx, r8
+        jb lbl_xor_buf_ymm_loop
+        xor rdx, rdx
+        jmp lbl_xor_buf_ymm_loop
+
+    ; XOR the remaining (< 32) bytes one by one
+    lbl_xor_buf_ymm_tail:
+        cmp rax, qword [buf_in_len]
+        jae lbl_xor_buf_ymm_done
+
+        movzx r9d, byte [rdi + rdx]
+        xor byte [rsi + rax], r9b
+        inc rax
+        inc rdx
+        jmp lbl_xor_buf_ymm_tail
+
+    lbl_xor_buf_ymm_done:
+    vzeroupper                          ; Avoid AVX-SSE transition penalties
+
+    lbl_xor_buf_ymm_end:
     mov rsp, rbp
     pop rbp
     ret
@@ -255,44 +327,32 @@ fn_xor_buf_ymm:
 fn_xor_buf:
     push rbp
     mov rbp, rsp
-    sub rsp, 0x10                       ; Stackframe
-    push rbx
-
-    ; call fn_dbg_print_buf_in
 
     mov rsi, [ptr_buf_in]               ; Load buf_in address in rsi
     mov rdi, [ptr_buf_key]              ; Load buf_key address in rdi
-    mov rbx, rdi                        ; Save start address of the key string
+    mov rcx, [buf_in_len]               ; Data length
+    mov r8, [buf_key_len]               ; Key length
 
-    xor rcx, rcx                        ; Zero out counter
+    xor rax, rax                        ; Offset in the input data
+    xor rdx, rdx                        ; Offset in the key
 
     lbl_xor_buf_loop:
-        movzx rax, byte [rsi]               ; Move input byte into al for XOR-ing
-        movzx r9, byte [rdi]                ; Move key byte into r9b for XOR-ing
-        xor rax, r9                         ; XORs
+        cmp rax, rcx                    ; Checked first, so empty files work
+        jae lbl_xor_buf_done
 
-        mov byte [rsi], al                  ; Replace buf_in in-place
+        movzx r9d, byte [rdi + rdx]     ; Move key byte into r9b for XOR-ing
+        xor byte [rsi + rax], r9b       ; XOR buf_in in-place
 
-        inc rsi                             ; Modify offset of the input data
-        inc rdi                             ; Modify offset of the key 
+        inc rax                         ; Modify offset of the input data
+        inc rdx                         ; Modify offset of the key
 
-        ; Circular looping through the key 
-        sub rdi, rbx                        ; Relative offset
-        cmp rdi, qword [buf_key_len]        ; Compare it to the length of the key
-        jl lbl_xor_buf_skip_modulo              
-        xor rdi, rdi                        ; Zeroes rdi to wrap around the key
+        ; Circular looping through the key
+        cmp rdx, r8
+        jb lbl_xor_buf_loop
+        xor rdx, rdx                    ; Zeroes rdx to wrap around the key
+        jmp lbl_xor_buf_loop
 
-    lbl_xor_buf_skip_modulo:
-        add rdi, rbx                        ; Move offset to the key again
-
-        inc rcx
-
-        cmp rcx, qword [buf_in_len]
-        jne lbl_xor_buf_loop
-
-    ; call fn_dbg_print_buf_in
-
-    pop rbx
+    lbl_xor_buf_done:
     mov rsp, rbp
     pop rbp
     ret
@@ -342,7 +402,12 @@ main:
     mov [buf_in_len], rax       ; Store the size of the file
 
     ; Allocate memory for the input data buffer
+    ; (mmap refuses a length of 0, so an empty file still gets 1 byte)
     mov rsi, [buf_in_len]
+    test rsi, rsi
+    jnz lbl_main_in_len_ok
+    inc rsi
+    lbl_main_in_len_ok:
     call fn_get_heap_mem
     mov [ptr_buf_in], rax
 
@@ -359,7 +424,13 @@ main:
 
     mov [buf_key_len], rax      ; Store the size of the file
 
-    ; Allocate memory for the input data buffer
+    ; An empty key can't be wrapped around the data
+    test rax, rax
+    jnz lbl_main_key_len_ok
+    call fn_error_exit
+    lbl_main_key_len_ok:
+
+    ; Allocate memory for the key buffer
     mov rsi, [buf_key_len]
     call fn_get_heap_mem
     mov [ptr_buf_key], rax
@@ -371,8 +442,16 @@ main:
     call fn_load_file
 
     ; Perform XOR of the buffer
-    ;call fn_xor_buf
+    ; The variant is picked at build time (see Makefile):
+    ;   default      - AVX2 YMM version
+    ;   -DUSE_GPR    - byte-by-byte version
+    ;   -DNO_XOR     - no XOR at all, only I/O (benchmark baseline)
+%ifdef NO_XOR
+%elifdef USE_GPR
+    call fn_xor_buf
+%else
     call fn_xor_buf_ymm
+%endif
 
     ; Store result into output file
     call fn_store_data
