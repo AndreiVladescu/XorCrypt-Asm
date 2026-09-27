@@ -92,17 +92,38 @@ For me, VirtualBox didn't implement the AVX2 registers (Ryzen 7 5700X), so I had
 ## Benchmark
 
 ### Test bench
-Ryzen 5 5600U, 32GB RAM, Linux Mint 22 (Host OS)
+Current results: Ryzen 7 5700X, 32GB RAM, Linux Mint 22.3 (Host OS)
+
+Old results: Ryzen 5 5600U, 32GB RAM, Linux Mint 22 (Host OS)
 
 ### Test parameters
 
-The benchmark is made using a python script, that will call `subprocess` for each variant of the XorCrypt, AVX2, GPR and a C program that compiles with `gcc -O3` and `gcc -O0`. Test bins are 100MB and 1GB random data from `/dev/urandom`:
+The benchmark is made using a python script, that will call `subprocess` for each variant of the XorCrypt: AVX2, GPR, the I/O-only baseline, and the C program compiled with `gcc -O0`, `gcc -O3` and `gcc -O3` with `#define KEY_SIZE`. Test bins are 100MB and 1GB random data from `/dev/urandom`:
 ```bash
 dd if=/dev/urandom of=random_1GB.data bs=1M count=1000 status=progress
 ```
 I tested 10 times for each run and picked the median time, so as not to skew the benchmark with outliers, such as caching the memory inside CPU.
 
 `benchmark.py` generates the random test files if they are missing, checks every program's output against a reference XOR before timing it, and saves the chart to `benchmark.png`. It times the whole program (start-up, reading, XOR, writing). Compare each result with the `I/O only` bar to see how much time the XOR itself takes.
+
+### Results
+
+32 byte key, median of 10 runs.
+
+![Benchmark Graph](benchmark.png)
+
+| Variant | 100MB | 1GB | 1GB minus I/O only |
+|---|---|---|---|
+| I/O only (no XOR) | 0.098s | 1.065s | - |
+| ASM AVX2 | 0.102s | 1.157s | 0.092s |
+| ASM GPR | 0.137s | 1.548s | 0.483s |
+| C gcc -O0 | 0.285s | 2.994s | 1.930s |
+| C gcc -O3 | 0.120s | 1.354s | 0.289s |
+| C gcc -O3, `KEY_SIZE` define | 0.122s | 1.349s | 0.284s |
+
+Most of the run time is reading and writing the files: the AVX2 version is only ~9% slower than the I/O-only baseline. Looking only at the XOR part (last column), AVX2 is ~5x faster than GPR and ~3x faster than C `-O3`, and C `-O3` is ~7x faster than `-O0` now that the loop gets vectorized. Fixing the key size at compile time with `#define KEY_SIZE` made no measurable difference.
+
+The 100MB times are too close to the I/O baseline to compare the XOR part reliably.
 
 ### Old results (invalid)
 
